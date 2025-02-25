@@ -1,0 +1,374 @@
+<html>
+<head>
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+  ga('create', 'UA-43052257-1', 'dpkingma.com');
+  ga('send', 'pageview');
+</script>
+
+<link rel="stylesheet" href="https://ajax.googleapis.com/ajax/libs/jqueryui/1.10.4/themes/smoothness/jquery-ui.min.css">
+
+<script src="numeric-1.2.6.js"></script>
+<script src="jstat.min.js"></script>
+
+<script src="https://code.jquery.com/jquery-1.9.1.js"></script>
+<script src="https://code.jquery.com/ui/1.10.4/jquery-ui.js"></script>
+
+<script src="jquery.ui.touch-punch.min.js"></script>
+
+<style>
+img:-moz-loading {
+    visibility: hidden;
+}
+.center {
+	margin-left:auto;
+	margin-right:auto
+}
+.uiel {
+	height: 30px;
+}
+#out {
+	width: 700px;
+}
+</style>
+
+<script>
+$(document).ready(function() {
+	
+	/* === Helper functions === */
+	
+	function niceOut(x) {
+		$('#out').append(numeric.prettyPrint(x))
+	}
+	
+	function loadCSV(fname) {
+		return numeric.parseCSV(numeric.getURL(fname).responseText.slice(0,-1));
+	}
+	
+	// get matrix min and max values
+	function getMinMax(x) {
+		var min = 1e20;
+		var max = -1e20;
+		var dims = numeric.dim(x);
+		for (var i=0; i<dims[0]; i++) {
+			for (var j=0; j<dims[1]; j++) {
+				min = Math.min(min, x[i][j]);
+				max = Math.max(max, x[i][j]);
+			}
+		}
+		return [min, max];
+	}
+	
+	function getCol(x, col) {
+		var rows = numeric.dim(x)[0];
+		return numeric.getBlock(x,[0,col],[rows-1,col])
+	}
+	function getRow(x, row) {
+		var cols = numeric.dim(x)[1];
+		return numeric.getBlock(x,[row,0],[row,cols-1])
+	}
+	
+	/*
+	function nonlinear_softplus(x) {
+		dims = numeric.dim(x);
+		result = new Array();
+		for (var i=0; i<dims[0]; i++) {
+			result[i] = Array();
+			for (var j=0; j<dims[1]; j++) {
+				result[i][j] = 
+			}
+		}
+	}
+	*/
+	
+	// Input is a matrix whose columns are drawn as 2D images
+	function matToImgs(x) {
+		scalefactor = 4
+		var dims = numeric.dim(x);
+		var n = Math.sqrt(dims[0]);
+		URLs = Array();
+		for (var xcol=0; xcol<dims[1]; xcol++) {
+			var y = Array();
+			if (scalefactor == 1) {
+				for (var row=0; row<n; row++) {
+					y[row] = Array();
+					for (var col=0; col<n; col++)
+						y[row][col] = x[row*n+col][xcol];
+				}
+			} else {
+				for (var row=0; row<n; row++) {
+					for (i=0; i<scalefactor; i++) {
+						yrow = scalefactor*row+i;
+						y[yrow] = Array()
+						for (var col=0; col<n; col++) {
+							for (j=0; j<scalefactor; j++) {
+								ycol = scalefactor*col+j;
+								y[yrow][ycol] = x[row*n+col][xcol];
+							}
+						}
+					}
+				}
+			}
+			//niceOut(y.dim)
+			var minmax = getMinMax(y);
+			y = numeric.div(numeric.sub(y, minmax[0]), minmax[1]-minmax[0]);
+			var rgb = numeric.sub(255, numeric.mul([y,y,y],256))
+			URLs[xcol] = numeric.imageURL(rgb);
+		}
+		return URLs;
+	}
+		
+	function debug() {
+		function drawFiltersAndBasisfunctions() {
+			disp(params['out_w']);
+			disp(numeric.transpose(params['q_w0']));
+		
+			//for (var i=0; i<800; i++)
+			//	disp(numeric.transpose(getRow(q_w0, i)), 28);
+		}
+		drawFiltersAndBasisfunctions();
+	}
+	
+	/* === Main functions === */
+
+	/* Load params */
+	function loadParams() {
+		params = Array();
+		$('#content').hide();
+		$('#console').append("<b>(Please be patient, loading ~20MB of data...)</b><br/>");
+		var names = ['out_b','out_w','b0','b1','w0z','w0y','w1'];
+		for (var i=0; i<names.length; i++) {
+			$('#console').append(""+names[i]+"...<br/>");
+			params[names[i]] = loadCSV('weights_yz_x/'+names[i]+'.csv');
+		}
+		$('#console').hide();
+		$('#content').show();
+		n_z = 50;
+		n_x = 784;
+		n_y = 10;
+	}
+	
+
+	function setupUI() {
+		
+		
+		// Create sliders
+		var showSliders = [0, 3, 5, 9, 12, 22, 23, 26, 31, 36, 37, 39]
+		
+		$('#ui').append("<table><tr id='head'></tr><tr id='body'></tr></table>");
+		
+		i = 1
+		for (var j=0; j<n_z; j++) { //n_z
+			var slidername = 'slider_'+j;
+			$('#ui table #head').append("<th id='th"+j+"'>"+i+"</th>");
+			$('#ui table #body').append("<td id='td"+j+"'><div style='float:left; height:100px; margin:5px' id='"+slidername+"'></div></td>");
+			$('#'+slidername).slider({
+				value: 50,
+				range: 'min',
+				animate: 'true',
+				orientation: 'vertical',
+				slide: function(event, ui) {
+					// console.log(event);
+					// console.log(ui);
+					updateImages();
+				}
+			});
+			
+			// Decide whether to hide slider
+			ss = numeric.sum(numeric.pow(getRow(params['w0z'], j), 2))
+			if (showSliders.indexOf(j) == -1) { 
+				$('#ui #th'+j).hide();
+				$('#ui #td'+j).hide();
+			} else
+				i++;
+		}
+		$('#ui').append('<div style="clear:both"></div>');
+	
+		// Radomize button
+		$('#buttons').append('<button id="randomize">Randomize!</button>');
+		$('button#randomize').button().click(function(event) {
+			for (var j=0; j<n_z; j++) {
+				var name = 'slider_'+j;
+				$('#'+name).slider('option', 'value', jStat.uniform.sample(1, 99));
+			}
+			updateImages();
+		});
+		
+		$('#buttons').append('<button id="reset">Reset</button>');
+		$('button#reset').button().click(function(event) {
+			for (var j=0; j<n_z; j++) {
+				var name = 'slider_'+j;
+				$('#'+name).slider('option', 'value', 50);
+			}
+			updateImages();
+		});
+		
+		$('#buttons').append('<label for="name">&nbsp;&nbsp;&nbsp;Dream:&nbsp;&nbsp;</label><input style="transform: scale(1.5);-webkit-transform: scale(1.5);" type="checkbox" id="dream" />');
+
+		$('#dream').change(function(){
+			hookBusy=false;
+		});
+	}
+		
+	/* === P(X|Z) (Generate digit from z) */
+	function px(y, z) {
+		
+		A = numeric.rep([1, n_y], 1)
+		
+		// Compute corresponding x
+		var h1 = numeric.add(
+			numeric.dotMMsmall(params['w0z'], z),
+			numeric.dotMMsmall(params['w0y'], y),
+			numeric.dotMMsmall(params['b0'], A)
+		);
+		h1 = numeric.log(numeric.add(1, numeric.exp(h1))); //softplus
+
+		var h2 = numeric.add(
+			numeric.dotMMsmall(params['w1'], h1),
+			numeric.dotMMsmall(params['b1'], A)
+		);
+		h2 = numeric.log(numeric.add(1, numeric.exp(h2))); //softplus
+		
+		var x = numeric.add(
+			numeric.dotMMsmall(params['out_w'], h2),
+			numeric.dotMMsmall(params['out_b'], A)
+		);
+		
+		x = numeric.div(1, numeric.add(1, numeric.exp(numeric.neg(x)))); // sigmoid
+		return x;
+
+	}
+	
+	function updateImages() {
+		y = numeric.rep([n_y, n_y], 0)
+		for (var i=0; i<n_y; i++)
+			y[i][i] = 1;
+		
+		z = numeric.rep([n_z, n_y], 0.5);
+		for (var j=0; j<n_z; j++) { //n_z
+			_z = getSliderValue(j)
+			for (var i=0; i<n_y; i++)
+				z[j][i] = _z
+		}
+		
+		x = px(y, z);
+		
+		URLs = matToImgs(x);
+		for (var i=0; i<n_y; i++) {
+			$('#out > #img'+i).attr('src', URLs[i]);
+		}
+	}
+	
+	function getSliderValue(j) {
+		var slider_value = $('#slider_'+j).slider('option','value');
+		//return jStat.normal.inv(0.01 + 0.98 * 0.01 * slider_value, 0, 1)
+		return jStat.normal.inv(0.01 + 0.98 * 0.01 * slider_value, 0, 1)
+	}
+	function setSliderValue(j, v) {
+		var newvalue = jStat.normal.cdf(v, 0, 1)
+		$('#'+'slider_'+j).slider('option', 'value', (newvalue - 0.01) / (0.98 * 0.01));
+	}
+	
+	// Gaussian diffusion process
+	hookBusy = false;
+	function hook() {
+		if (hookBusy) return;
+		if (!$("#dream").is(':checked')) return;
+		hookBusy = true;
+		
+		if (typeof dz === 'undefined') {
+			dz = Array();
+			for (var j=0; j<n_z; j++) {
+				dz[j] = 0
+			}
+		}
+		
+		sd = 0.3
+		smoothness = 0.1
+		for (var j=0; j<n_z; j++) {
+			_z = getSliderValue(j)
+			dz[j] += smoothness * (jStat.normal.inv(Math.random(), 0, 1) - dz[j])
+			_z = Math.sqrt(1 - sd*sd) * _z + sd * dz[j]
+			setSliderValue(j, _z)
+		}
+		updateImages();
+		
+		hookBusy = false;
+	}
+	
+	function main() {
+		loadParams();
+		setupUI();
+		
+		updateImages();
+		// Generate random numbers from uniform dist
+		// latents[0] = numeric.random([n_z, 1]);
+		// latents[1] = numeric.random([n_z, 1]);
+		
+		var t=setInterval(hook,200);
+	}
+	main();
+})
+</script>
+</head>
+<body>
+&#8592; <a href='http://www.dpkingma.com/'> Home</a>
+<h2>Digit Fantasies by a Deep Generative Model</h2>
+<p>Instructions:
+<ol>
+	<li>Dream mode: check 'dream' to let the model fantasize digits.</li>
+	<li>Alternatively, you can wiggle the sliders yourselves to wander through <b>z</b>-space and observe the effects in <b>x</b>-space.</li>
+</ol>
+</p>
+<hr/>
+<div id='console'></div>
+<div id='content'>
+<table>
+<tr><td><center>
+	<div id='buttons'></div>	
+</center></td><td></td></tr>
+<tr><td><center><div id='ui'></div></center></td>
+<td>(Latent space) <b>z</b></td>
+</tr>
+<tr><td><center><div id='out'>
+	<img id='img0' src='' />
+	<img id='img1' src='' />
+	<img id='img2' src='' />
+	<img id='img3' src='' />
+	<img id='img4' src='' /><br/>
+	<img id='img5' src='' />
+	<img id='img6' src='' />
+	<img id='img7' src='' />
+	<img id='img8' src='' />
+	<img id='img9' src='' />
+	
+</div></center></td>
+<td>(Observed space) <b>x</b></td>
+</tr>
+</table>
+</div>
+<hr />
+<p>
+References:
+<ol>
+<li><a href='http://arxiv.org/abs/1312.6114'>D.P. Kingma, M. Welling (2013). Auto-Encoding Variational Bayes</a></li>
+<li><a href='http://arxiv.org/abs/1401.4082'>D.J. Rezende, S. Mohamed, D. Wierstra (2014). Stochastic Backpropagation and Approximate Inference in Deep Generative Models</a></li>
+<li><a href='http://arxiv.org/abs/1406.5298'>D.P. Kingma, D.J. Rezende, S. Mohamed, M. Welling (2014). Semi-Supervised Learning with Deep Generative Models</a></li>
+</ol>
+</p>
+<p>Also see the <a href='demo_old.html'>old demo</a>, and Vincent Dumoulin's cool <a href='http://vdumoulin.github.io/morphing_faces/'>TFD demo</a>.</p>
+<hr />
+<h2>Video's</h2>
+<ul>
+<li>MNIST: <a href='https://www.youtube.com/watch?v=0QI3xgXuB-Q'>https://www.youtube.com/watch?v=0QI3xgXuB-Q</a></li>
+<li>SVHN: <a href='https://www.youtube.com/watch?v=G_S5m8Jb3Yg'>https://www.youtube.com/watch?v=G_S5m8Jb3Yg</a></li>
+</ul>
+<h3>MNIST</h3>
+<iframe width="420" height="315" src="https://www.youtube.com/embed/0QI3xgXuB-Q" frameborder="0" allowfullscreen></iframe>
+<h3>SVHN</h3>
+<iframe width="420" height="315" src="https://www.youtube.com/embed/G_S5m8Jb3Yg" frameborder="0" allowfullscreen></iframe>
+</body>
+</html>
